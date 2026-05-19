@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use hidapi::{DeviceInfo, HidApi, HidDevice};
 use std::time::{Duration, Instant};
@@ -258,8 +258,13 @@ fn format_resp(resp: &[u8]) -> String {
 
 fn read_notification_flags(dev: &HidDevice) -> Result<[u8; 3]> {
     let req: [u8; 7] = [
-        HIDPP_SHORT, HIDPP_RECEIVER, REG_READ_SHORT, REG_NOTIFICATIONS,
-        0x00, 0x00, 0x00,
+        HIDPP_SHORT,
+        HIDPP_RECEIVER,
+        REG_READ_SHORT,
+        REG_NOTIFICATIONS,
+        0x00,
+        0x00,
+        0x00,
     ];
     let resp = hidpp_write_short(dev, &req)?;
     if is_error(&resp) {
@@ -270,8 +275,13 @@ fn read_notification_flags(dev: &HidDevice) -> Result<[u8; 3]> {
 
 fn write_notification_flags(dev: &HidDevice, flags: [u8; 3]) -> Result<()> {
     let req: [u8; 7] = [
-        HIDPP_SHORT, HIDPP_RECEIVER, REG_WRITE_SHORT, REG_NOTIFICATIONS,
-        flags[0], flags[1], flags[2],
+        HIDPP_SHORT,
+        HIDPP_RECEIVER,
+        REG_WRITE_SHORT,
+        REG_NOTIFICATIONS,
+        flags[0],
+        flags[1],
+        flags[2],
     ];
     let resp = hidpp_write_short(dev, &req)?;
     if is_error(&resp) {
@@ -356,8 +366,13 @@ fn bolt_read_device_name(dev: &HidDevice, slot: u8) -> Result<String> {
     // IMPORTANT: The request is sent as a SHORT message (7 bytes), the response is LONG (20 bytes)
     let sub_reg = 0x60 + slot;
     let req: [u8; 7] = [
-        HIDPP_SHORT, HIDPP_RECEIVER, REG_READ_LONG, REG_PAIRING_INFO,
-        sub_reg, 0x01, 0x00,
+        HIDPP_SHORT,
+        HIDPP_RECEIVER,
+        REG_READ_LONG,
+        REG_PAIRING_INFO,
+        sub_reg,
+        0x01,
+        0x00,
     ];
     let resp = hidpp_write_short(dev, &req)?;
     if is_error(&resp) {
@@ -384,8 +399,13 @@ fn bolt_read_pairing_info(dev: &HidDevice, slot: u8) -> Result<Option<(u8, Strin
     // IMPORTANT: The request is sent as a SHORT message (7 bytes), the response is LONG (20 bytes)
     let sub_reg = 0x50 + slot;
     let req: [u8; 7] = [
-        HIDPP_SHORT, HIDPP_RECEIVER, REG_READ_LONG, REG_PAIRING_INFO,
-        sub_reg, 0x00, 0x00,
+        HIDPP_SHORT,
+        HIDPP_RECEIVER,
+        REG_READ_LONG,
+        REG_PAIRING_INFO,
+        sub_reg,
+        0x00,
+        0x00,
     ];
     let resp = hidpp_write_short(dev, &req)?;
     if is_error(&resp) {
@@ -484,8 +504,13 @@ fn list_unifying_devices(dev: &HidDevice) {
 fn list_bolt_devices(dev: &HidDevice) {
     // Read device count from register 0x02
     let req: [u8; 7] = [
-        HIDPP_SHORT, HIDPP_RECEIVER, REG_READ_SHORT, 0x02,
-        0x00, 0x00, 0x00,
+        HIDPP_SHORT,
+        HIDPP_RECEIVER,
+        REG_READ_SHORT,
+        0x02,
+        0x00,
+        0x00,
+        0x00,
     ];
     let count = match hidpp_write_short(dev, &req) {
         Ok(resp) if !is_error(&resp) && resp.len() >= 6 => resp[5],
@@ -542,8 +567,13 @@ fn cmd_pair_unifying(dev: &HidDevice, _pid: u16, timeout: u8) -> Result<()> {
     // Step 2: Open pairing lock
     println!("[2/4] Opening pairing lock (timeout: {timeout}s)...");
     let req: [u8; 7] = [
-        HIDPP_SHORT, HIDPP_RECEIVER, REG_WRITE_SHORT, REG_PAIRING,
-        PAIR_ACTION_OPEN, 0x00, timeout,
+        HIDPP_SHORT,
+        HIDPP_RECEIVER,
+        REG_WRITE_SHORT,
+        REG_PAIRING,
+        PAIR_ACTION_OPEN,
+        0x00,
+        timeout,
     ];
     let resp = hidpp_write_short(dev, &req)?;
     if is_error(&resp) {
@@ -632,8 +662,13 @@ fn cmd_pair_unifying(dev: &HidDevice, _pid: u16, timeout: u8) -> Result<()> {
     } else {
         println!("      TIMEOUT - no device connected.");
         let close_req: [u8; 7] = [
-            HIDPP_SHORT, HIDPP_RECEIVER, REG_WRITE_SHORT, REG_PAIRING,
-            PAIR_ACTION_CLOSE, 0x00, 0x00,
+            HIDPP_SHORT,
+            HIDPP_RECEIVER,
+            REG_WRITE_SHORT,
+            REG_PAIRING,
+            PAIR_ACTION_CLOSE,
+            0x00,
+            0x00,
         ];
         let _ = hidpp_write_short(dev, &close_req);
     }
@@ -662,8 +697,13 @@ fn cmd_pair_bolt(dev: &HidDevice, timeout: u8) -> Result<()> {
     // Step 2: Start Bolt discovery
     println!("[2/5] Starting Bolt device discovery (timeout: {timeout}s)...");
     let req: [u8; 7] = [
-        HIDPP_SHORT, HIDPP_RECEIVER, REG_WRITE_SHORT, REG_BOLT_DISCOVERY,
-        timeout, 0x01, 0x00,
+        HIDPP_SHORT,
+        HIDPP_RECEIVER,
+        REG_WRITE_SHORT,
+        REG_BOLT_DISCOVERY,
+        timeout,
+        0x01,
+        0x00,
     ];
     let resp = hidpp_write_short(dev, &req)?;
     if is_error(&resp) {
@@ -689,18 +729,22 @@ fn cmd_pair_bolt(dev: &HidDevice, timeout: u8) -> Result<()> {
 
     while Instant::now() < disc_deadline && !discovery_done {
         // If we have a complete device and grace period elapsed, stop early
-        if let Some(ft) = first_device_time {
-            if Instant::now() > ft + grace_period {
-                println!("      Discovery grace period ended.");
-                // Cancel discovery
-                let cancel_req: [u8; 7] = [
-                    HIDPP_SHORT, HIDPP_RECEIVER, REG_WRITE_SHORT, REG_BOLT_DISCOVERY,
-                    0x00, 0x02, 0x00,
-                ];
-                let _ = hidpp_write_short(dev, &cancel_req);
-                discovery_done = true;
-                break;
-            }
+        if let Some(ft) = first_device_time
+            && Instant::now() > ft + grace_period
+        {
+            println!("      Discovery grace period ended.");
+            // Cancel discovery
+            let cancel_req: [u8; 7] = [
+                HIDPP_SHORT,
+                HIDPP_RECEIVER,
+                REG_WRITE_SHORT,
+                REG_BOLT_DISCOVERY,
+                0x00,
+                0x02,
+                0x00,
+            ];
+            let _ = hidpp_write_short(dev, &cancel_req);
+            break;
         }
 
         let msg = match hidpp_read_raw(dev, 1000)? {
@@ -746,23 +790,27 @@ fn cmd_pair_bolt(dev: &HidDevice, timeout: u8) -> Result<()> {
                 let name = String::from_utf8_lossy(&msg[7..end]).to_string();
 
                 // Find device by counter to associate name
-                if let Some(idx) = discovered.iter().position(|d| d.counter == counter) {
-                    if discovered[idx].name.is_empty() {
-                        discovered[idx].name = name.clone();
-                        // Print on first name discovery only
-                        let d = &discovered[idx];
-                        println!(
-                            "      [{}] {} \"{}\" (addr {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X})",
-                            idx + 1,
-                            describe_device_type(d.device_kind),
-                            d.name,
-                            d.address[0], d.address[1], d.address[2],
-                            d.address[3], d.address[4], d.address[5],
-                        );
-                        // Start grace timer on first complete device
-                        if first_device_time.is_none() {
-                            first_device_time = Some(Instant::now());
-                        }
+                if let Some(idx) = discovered.iter().position(|d| d.counter == counter)
+                    && discovered[idx].name.is_empty()
+                {
+                    discovered[idx].name = name.clone();
+                    // Print on first name discovery only
+                    let d = &discovered[idx];
+                    println!(
+                        "      [{}] {} \"{}\" (addr {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X})",
+                        idx + 1,
+                        describe_device_type(d.device_kind),
+                        d.name,
+                        d.address[0],
+                        d.address[1],
+                        d.address[2],
+                        d.address[3],
+                        d.address[4],
+                        d.address[5],
+                    );
+                    // Start grace timer on first complete device
+                    if first_device_time.is_none() {
+                        first_device_time = Some(Instant::now());
                     }
                 }
             }
@@ -792,13 +840,24 @@ fn cmd_pair_bolt(dev: &HidDevice, timeout: u8) -> Result<()> {
 
     // Auto-select: if only one device, pick it; otherwise pick the first one
     let target = if discovered.len() == 1 {
-        println!("\n      Auto-selecting: {} \"{}\"",
-            describe_device_type(discovered[0].device_kind), discovered[0].name);
+        println!(
+            "\n      Auto-selecting: {} \"{}\"",
+            describe_device_type(discovered[0].device_kind),
+            discovered[0].name
+        );
         discovered[0].clone()
     } else {
-        println!("\n      Found {} devices. Selecting the first one.", discovered.len());
+        println!(
+            "\n      Found {} devices. Selecting the first one.",
+            discovered.len()
+        );
         for (i, d) in discovered.iter().enumerate() {
-            println!("        [{}] {} \"{}\"", i + 1, describe_device_type(d.device_kind), d.name);
+            println!(
+                "        [{}] {} \"{}\"",
+                i + 1,
+                describe_device_type(d.device_kind),
+                d.name
+            );
         }
         discovered[0].clone()
     };
@@ -962,8 +1021,13 @@ fn cmd_unpair_unifying(dev: &HidDevice, slot: u8) -> Result<()> {
     }
 
     let req: [u8; 7] = [
-        HIDPP_SHORT, HIDPP_RECEIVER, REG_WRITE_SHORT, REG_PAIRING,
-        PAIR_ACTION_UNPAIR, slot, 0x00,
+        HIDPP_SHORT,
+        HIDPP_RECEIVER,
+        REG_WRITE_SHORT,
+        REG_PAIRING,
+        PAIR_ACTION_UNPAIR,
+        slot,
+        0x00,
     ];
     let resp = hidpp_write_short(dev, &req)?;
     if is_error(&resp) {
@@ -1020,11 +1084,15 @@ fn cmd_debug(api: &HidApi, path: Option<&str>) -> Result<()> {
     for d in api.device_list().filter(|d| d.vendor_id() == LOGITECH_VID) {
         println!(
             "  PID=0x{:04X}  usage_page=0x{:04X}  usage=0x{:04X}  iface={}",
-            d.product_id(), d.usage_page(), d.usage(), d.interface_number()
+            d.product_id(),
+            d.usage_page(),
+            d.usage(),
+            d.interface_number()
         );
         println!(
             "    path={}\n    product={:?}",
-            d.path().to_string_lossy(), d.product_string()
+            d.path().to_string_lossy(),
+            d.product_string()
         );
     }
 
@@ -1045,7 +1113,15 @@ fn cmd_debug(api: &HidApi, path: Option<&str>) -> Result<()> {
 
     // Try reg 0x02 (connection state) via short read
     println!("\n--- Connection state (reg 0x02 short read) ---");
-    let req02: [u8; 7] = [HIDPP_SHORT, HIDPP_RECEIVER, REG_READ_SHORT, 0x02, 0x00, 0x00, 0x00];
+    let req02: [u8; 7] = [
+        HIDPP_SHORT,
+        HIDPP_RECEIVER,
+        REG_READ_SHORT,
+        0x02,
+        0x00,
+        0x00,
+        0x00,
+    ];
     match hidpp_write_short(&dev, &req02) {
         Ok(resp) => println!("  resp: {}", format_resp(&resp)),
         Err(e) => println!("  error: {e}"),
@@ -1053,7 +1129,15 @@ fn cmd_debug(api: &HidApi, path: Option<&str>) -> Result<()> {
 
     // Try to trigger connection notifications via reg 0x02 write
     println!("\n--- Triggering connection state notifications (write 0x02) ---");
-    let req02w: [u8; 7] = [HIDPP_SHORT, HIDPP_RECEIVER, REG_WRITE_SHORT, 0x02, 0x02, 0x00, 0x00];
+    let req02w: [u8; 7] = [
+        HIDPP_SHORT,
+        HIDPP_RECEIVER,
+        REG_WRITE_SHORT,
+        0x02,
+        0x02,
+        0x00,
+        0x00,
+    ];
     match hidpp_write_short(&dev, &req02w) {
         Ok(resp) => {
             println!("  write resp: {}", format_resp(&resp));
@@ -1073,8 +1157,13 @@ fn cmd_debug(api: &HidApi, path: Option<&str>) -> Result<()> {
     println!("\n--- Bolt pairing info (reg 0xB5, sub 0x50-0x52, 0x61-0x62) ---");
     for sub_reg in [0x50u8, 0x51, 0x52, 0x61, 0x62] {
         let req: [u8; 7] = [
-            HIDPP_SHORT, HIDPP_RECEIVER, REG_READ_LONG, REG_PAIRING_INFO,
-            sub_reg, 0x01, 0x00,
+            HIDPP_SHORT,
+            HIDPP_RECEIVER,
+            REG_READ_LONG,
+            REG_PAIRING_INFO,
+            sub_reg,
+            0x01,
+            0x00,
         ];
         match hidpp_write_short(&dev, &req) {
             Ok(resp) => {
