@@ -27,7 +27,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact: logicli-x86_64-unknown-linux-gnu
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -64,17 +64,17 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: true
 
       - name: Generate checksums
         run: |
           cd artifacts
-          find . -type f -name "logicli-*" -exec mv {} . \;
           sha256sum logicli-* > checksums-sha256.txt
           cat checksums-sha256.txt
 
