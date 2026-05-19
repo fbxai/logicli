@@ -352,39 +352,49 @@ fn unifying_read_pairing_info(dev: &HidDevice, slot: u8) -> Result<Option<(u8, S
 // ─── Bolt device info ───────────────────────────────────────────────────────
 
 fn bolt_read_device_name(dev: &HidDevice, slot: u8) -> Result<String> {
+    // Bolt uses GET_LONG_REGISTER (0x83) on register 0xB5 with sub-register 0x60+slot
+    // IMPORTANT: The request is sent as a SHORT message (7 bytes), the response is LONG (20 bytes)
     let sub_reg = 0x60 + slot;
-    let mut req = [0u8; 20];
-    req[0] = HIDPP_LONG;
-    req[1] = HIDPP_RECEIVER;
-    req[2] = REG_READ_LONG;
-    req[3] = REG_PAIRING_INFO;
-    req[4] = sub_reg;
-    req[5] = 0x01;
-    let resp = hidpp_write_long(dev, &req)?;
+    let req: [u8; 7] = [
+        HIDPP_SHORT, HIDPP_RECEIVER, REG_READ_LONG, REG_PAIRING_INFO,
+        sub_reg, 0x01, 0x00,
+    ];
+    let resp = hidpp_write_short(dev, &req)?;
     if is_error(&resp) {
         bail!("device name register not supported");
     }
-    if resp.len() >= 7 {
-        let name_len = resp[6] as usize;
+    // Response: [0x11, 0xFF, 0x83, 0xB5, sub_reg, ...name_data...]
+    // In Solaar: codename = resp[3 : 3 + min(14, resp[2])]  (offset from data start at byte 4)
+    // So: name_len = resp[4+2] = resp[6], name starts at resp[4+3] = resp[7]
+    if resp.len() >= 8 {
+        let name_len = std::cmp::min(resp[6] as usize, 14);
         let end = std::cmp::min(7 + name_len, resp.len());
-        Ok(String::from_utf8_lossy(&resp[7..end]).to_string())
+        let name = String::from_utf8_lossy(&resp[7..end]).trim().to_string();
+        if name.is_empty() {
+            bail!("empty device name");
+        }
+        Ok(name)
     } else {
         bail!("response too short for device name");
     }
 }
 
 fn bolt_read_pairing_info(dev: &HidDevice, slot: u8) -> Result<Option<(u8, String)>> {
+    // Bolt uses GET_LONG_REGISTER (0x83) on register 0xB5 with sub-register 0x50+slot
+    // IMPORTANT: The request is sent as a SHORT message (7 bytes), the response is LONG (20 bytes)
     let sub_reg = 0x50 + slot;
-    let mut req = [0u8; 20];
-    req[0] = HIDPP_LONG;
-    req[1] = HIDPP_RECEIVER;
-    req[2] = REG_READ_LONG;
-    req[3] = REG_PAIRING_INFO;
-    req[4] = sub_reg;
-    let resp = hidpp_write_long(dev, &req)?;
+    let req: [u8; 7] = [
+        HIDPP_SHORT, HIDPP_RECEIVER, REG_READ_LONG, REG_PAIRING_INFO,
+        sub_reg, 0x00, 0x00,
+    ];
+    let resp = hidpp_write_short(dev, &req)?;
     if is_error(&resp) {
         return Ok(None);
     }
+    // Response: [0x11, 0xFF, 0x83, 0xB5, sub_reg, device_type_byte, wpid_lo, wpid_hi, serial...]
+    // In Solaar: kind = resp[1] & 0x0F, wpid = resp[3:4]+resp[2:3]
+    // Adjusting offsets for raw response: data starts at byte 4 (after 0x11, 0xFF, 0x83, 0xB5)
+    // So: device_type = resp[5] & 0x0F, wpid = format(resp[7], resp[6])
     if resp.len() >= 8 {
         let device_type = resp[5] & 0x0F;
         let wpid = format!("{:02X}{:02X}", resp[7], resp[6]);
@@ -472,27 +482,34 @@ fn list_unifying_devices(dev: &HidDevice) {
 }
 
 fn list_bolt_devices(dev: &HidDevice) {
-    // Bolt receiver doesn't support GET_LONG_REGISTER (0x83) for register 0xB5,
-    // so we can't query individual device info. Instead, read the device count
-    // from register 0x02 and report it.
+    // Read device count from register 0x02
     let req: [u8; 7] = [
         HIDPP_SHORT, HIDPP_RECEIVER, REG_READ_SHORT, 0x02,
         0x00, 0x00, 0x00,
     ];
-    match hidpp_write_short(dev, &req) {
-        Ok(resp) if !is_error(&resp) && resp.len() >= 6 => {
-            let count = resp[5];
-            if count == 0 {
-                println!("  Paired devices: (none)");
-            } else {
-                println!("  Paired devices: {count} device(s) registered");
-                println!("    (Bolt receiver does not expose device names via HID++ 1.0 registers)");
-                println!("    Use 'logicli pair' to discover and pair new devices.");
-            }
-        }
+    let count = match hidpp_write_short(dev, &req) {
+        Ok(resp) if !is_error(&resp) && resp.len() >= 6 => resp[5],
         _ => {
             println!("  Paired devices: (unknown - could not query)");
+            return;
         }
+    };
+
+    if count == 0 {
+        println!("  Paired devices: (none)");
+        return;
+    }
+
+    println!("  Paired devices ({count}):");
+    for slot in 1..=count {
+        let name = bolt_read_device_name(dev, slot).unwrap_or_else(|_| "<unknown>".to_string());
+        let type_str = match bolt_read_pairing_info(dev, slot) {
+            Ok(Some((kind, wpid))) => {
+                format!("{} [WPID {}]", describe_device_type(kind), wpid)
+            }
+            _ => "device".to_string(),
+        };
+        println!("    Slot {slot}: {name} ({type_str})");
     }
 }
 
@@ -1052,16 +1069,14 @@ fn cmd_debug(api: &HidApi, path: Option<&str>) -> Result<()> {
         Err(e) => println!("  error: {e}"),
     }
 
-    // Try Bolt pairing info sub-registers
-    println!("\n--- Bolt pairing info (reg 0xB5, sub 0x50-0x52) ---");
-    for sub_reg in 0x50u8..=0x52 {
-        let mut req = [0u8; 20];
-        req[0] = HIDPP_LONG;
-        req[1] = HIDPP_RECEIVER;
-        req[2] = REG_READ_LONG;
-        req[3] = REG_PAIRING_INFO;
-        req[4] = sub_reg;
-        match hidpp_write_long(&dev, &req) {
+    // Try Bolt pairing info sub-registers (using SHORT request for GET_LONG_REGISTER)
+    println!("\n--- Bolt pairing info (reg 0xB5, sub 0x50-0x52, 0x61-0x62) ---");
+    for sub_reg in [0x50u8, 0x51, 0x52, 0x61, 0x62] {
+        let req: [u8; 7] = [
+            HIDPP_SHORT, HIDPP_RECEIVER, REG_READ_LONG, REG_PAIRING_INFO,
+            sub_reg, 0x01, 0x00,
+        ];
+        match hidpp_write_short(&dev, &req) {
             Ok(resp) => {
                 let err = if is_error(&resp) { " [ERR]" } else { " [OK]" };
                 println!("  0x{sub_reg:02X}:{err} {}", format_resp(&resp));
