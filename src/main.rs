@@ -149,7 +149,7 @@ fn main() -> Result<()> {
 
 fn cmd_version() {
     let version = option_env!("LOGICLI_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
-    let commit = option_env!("LOGICLI_COMMIT").unwrap_or("unknown");
+    let commit = option_env!("LOGICLI_COMMIT").unwrap_or("dev");
     let build_date = option_env!("LOGICLI_BUILD_DATE").unwrap_or("unknown");
     println!("logicli {version}");
     println!("commit:  {commit}");
