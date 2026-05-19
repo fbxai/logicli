@@ -94,6 +94,9 @@ enum Command {
         /// Discovery/pairing window timeout in seconds
         #[arg(long, default_value_t = 30)]
         timeout: u8,
+        /// Use reduced entropy for mouse pairing (4 button presses instead of 10)
+        #[arg(long)]
+        short_auth: bool,
     },
     /// Unpair a device from a slot (1-6)
     Unpair {
@@ -117,7 +120,11 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::List => cmd_list(&api),
-        Command::Pair { path, timeout } => cmd_pair(&api, path.as_deref(), timeout),
+        Command::Pair {
+            path,
+            timeout,
+            short_auth,
+        } => cmd_pair(&api, path.as_deref(), timeout, short_auth),
         Command::Unpair { slot, path } => cmd_unpair(&api, slot, path.as_deref()),
         Command::Debug { path } => cmd_debug(&api, path.as_deref()),
     }
@@ -540,7 +547,7 @@ fn list_bolt_devices(dev: &HidDevice) {
 
 // ─── cmd_pair ───────────────────────────────────────────────────────────────
 
-fn cmd_pair(api: &HidApi, path: Option<&str>, timeout: u8) -> Result<()> {
+fn cmd_pair(api: &HidApi, path: Option<&str>, timeout: u8, short_auth: bool) -> Result<()> {
     let info = pick_receiver(api, path)?;
     let pid = info.product_id();
     let rname = receiver_name(pid).unwrap_or("receiver");
@@ -552,7 +559,7 @@ fn cmd_pair(api: &HidApi, path: Option<&str>, timeout: u8) -> Result<()> {
     println!("=== Pairing on {rname} (PID 0x{pid:04X}) ===\n");
 
     if is_bolt(pid) {
-        cmd_pair_bolt(&dev, timeout)
+        cmd_pair_bolt(&dev, timeout, short_auth)
     } else {
         cmd_pair_unifying(&dev, pid, timeout)
     }
@@ -688,7 +695,7 @@ struct BoltDiscoveredDevice {
     name: String,
 }
 
-fn cmd_pair_bolt(dev: &HidDevice, timeout: u8) -> Result<()> {
+fn cmd_pair_bolt(dev: &HidDevice, timeout: u8, short_auth: bool) -> Result<()> {
     // Step 1: Enable notifications
     println!("[1/5] Enabling notifications...");
     let old_flags = enable_notifications(dev).context("enabling notifications")?;
@@ -870,7 +877,17 @@ fn cmd_pair_bolt(dev: &HidDevice, timeout: u8) -> Result<()> {
 
     // Send pair command via long register 0xC1
     // [0x11, 0xFF, 0x82, 0xC1, action, slot, address[6], auth, entropy, ...]
-    let entropy: u8 = if target.device_kind == 0x01 { 20 } else { 10 };
+    // Entropy = bits of passkey randomness:
+    //   Keyboards: 20 bits (6 digit passkey typed on the device)
+    //   Mice default: 10 bits (10 left/right button presses)
+    //   Mice --short-auth: 4 bits (4 button presses — faster, less secure)
+    let entropy: u8 = if target.device_kind == 0x01 {
+        20
+    } else if short_auth {
+        4
+    } else {
+        10
+    };
     let mut pair_req = [0u8; 20];
     pair_req[0] = HIDPP_LONG;
     pair_req[1] = HIDPP_RECEIVER;
@@ -917,9 +934,36 @@ fn cmd_pair_bolt(dev: &HidDevice, timeout: u8) -> Result<()> {
                 .to_string();
             if !passkey.is_empty() && !passkey_shown {
                 println!("\n      ╔══════════════════════════════════════╗");
-                println!("      ║  PASSKEY: {passkey}                    ║");
-                println!("      ╚══════════════════════════════════════╝");
-                println!("      Type this passkey on the keyboard, then press ENTER.\n");
+                if target.authentication & 0x01 != 0 {
+                    // Keyboard-style: type digits + Enter
+                    println!("      ║  PASSKEY: {passkey:<26}  ║");
+                    println!("      ╚══════════════════════════════════════╝");
+                    println!("      Type this passkey on the keyboard, then press ENTER.\n");
+                } else {
+                    // Mouse-style: left/right button presses based on binary passkey
+                    let passkey_num: u32 = passkey.parse().unwrap_or(0);
+                    let bits: String = (0..entropy)
+                        .rev()
+                        .map(|i| {
+                            if passkey_num & (1 << i) != 0 {
+                                '1'
+                            } else {
+                                '0'
+                            }
+                        })
+                        .collect();
+                    let sequence: Vec<&str> = bits
+                        .chars()
+                        .map(|b| if b == '1' { "RIGHT" } else { "LEFT" })
+                        .collect();
+                    println!("      ║  BUTTON SEQUENCE:                    ║");
+                    println!("      ╚══════════════════════════════════════╝");
+                    println!("      Press buttons in this order:");
+                    for (i, btn) in sequence.iter().enumerate() {
+                        println!("        {:2}. {btn}", i + 1);
+                    }
+                    println!("      Then press LEFT + RIGHT simultaneously.\n");
+                }
                 use std::io::Write;
                 let _ = std::io::stdout().flush();
                 passkey_shown = true;
