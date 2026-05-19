@@ -106,6 +106,8 @@ enum Command {
         #[arg(long)]
         path: Option<String>,
     },
+    /// Show version, commit SHA, and build info
+    Version,
     /// Debug: dump raw register reads from the receiver
     Debug {
         /// HID path of the receiver; omit to pick the first one found
@@ -116,18 +118,42 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let api = HidApi::new().context("initialising hidapi")?;
 
     match cli.command {
-        Command::List => cmd_list(&api),
+        Command::List => {
+            let api = HidApi::new().context("initialising hidapi")?;
+            cmd_list(&api)
+        }
         Command::Pair {
             path,
             timeout,
             short_auth,
-        } => cmd_pair(&api, path.as_deref(), timeout, short_auth),
-        Command::Unpair { slot, path } => cmd_unpair(&api, slot, path.as_deref()),
-        Command::Debug { path } => cmd_debug(&api, path.as_deref()),
+        } => {
+            let api = HidApi::new().context("initialising hidapi")?;
+            cmd_pair(&api, path.as_deref(), timeout, short_auth)
+        }
+        Command::Unpair { slot, path } => {
+            let api = HidApi::new().context("initialising hidapi")?;
+            cmd_unpair(&api, slot, path.as_deref())
+        }
+        Command::Version => {
+            cmd_version();
+            Ok(())
+        }
+        Command::Debug { path } => {
+            let api = HidApi::new().context("initialising hidapi")?;
+            cmd_debug(&api, path.as_deref())
+        }
     }
+}
+
+fn cmd_version() {
+    let version = option_env!("LOGICLI_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+    let commit = option_env!("LOGICLI_COMMIT").unwrap_or("unknown");
+    let build_date = option_env!("LOGICLI_BUILD_DATE").unwrap_or("unknown");
+    println!("logicli {version}");
+    println!("commit:  {commit}");
+    println!("built:   {build_date}");
 }
 
 // ─── HID interface discovery ────────────────────────────────────────────────

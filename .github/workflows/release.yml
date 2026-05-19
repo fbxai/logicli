@@ -41,6 +41,10 @@ jobs:
           sudo apt-get install -y libudev-dev libhidapi-dev
 
       - name: Build release binary
+        env:
+          LOGICLI_VERSION: ${{ github.ref_name }}
+          LOGICLI_COMMIT: ${{ github.sha }}
+          LOGICLI_BUILD_DATE: ${{ github.event.head_commit.timestamp }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package binary
