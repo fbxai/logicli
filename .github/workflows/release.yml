@@ -24,8 +24,8 @@ jobs:
             target: aarch64-apple-darwin
             artifact: logicli-aarch64-apple-darwin
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: logicli-x86_64-unknown-linux-gnu
+            target: x86_64-debian-linux
+            artifact: logicli-x86_64-debian-linux
     steps:
       - uses: actions/checkout@v6
 
