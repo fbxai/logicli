@@ -737,7 +737,7 @@ fn bolt_pair_with_fallback(
         ])
     {
         println!(
-            "      Short-auth is not supported by this device/receiver. Retrying with standard authentication (10 button presses)..."
+            "\n      WARNING: Short-auth is not supported by this device/receiver.\n      Falling back to standard authentication (default: 10 button presses)...\n"
         );
         req[13] = 10;
         resp = write(&req)?;
@@ -1288,6 +1288,23 @@ mod tests {
         let mut req = [0u8; 20];
         req[..14].copy_from_slice(&[0x11, 0xFF, 0x82, 0xC1, 1, 0, 1, 2, 3, 4, 5, 6, 2, entropy]);
         req
+    }
+
+    #[test]
+    fn short_auth_warning_calls_out_default_fallback() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::unsupported_short_auth_retries_once_with_ten_bits",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stdout.contains(
+            "\n      WARNING: Short-auth is not supported by this device/receiver.\n      Falling back to standard authentication (default: 10 button presses)...\n\n"
+        ));
     }
 
     #[test]
