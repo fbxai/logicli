@@ -45,18 +45,22 @@ run *ARGS:
     cargo run -- {{ARGS}}
 
 # Build (if needed) then list connected receivers.
+[group('dev release cli')]
 list: build
     {{bin}} list
 
 # Open the pairing lock. Optional TIMEOUT in seconds (default 30).
+[group('dev release cli')]
 pair TIMEOUT="30": build
     {{bin}} pair --timeout {{TIMEOUT}}
 
 # Unpair a slot (1..=6).
+[group('dev release cli')]
 unpair SLOT: build
     {{bin}} unpair {{SLOT}}
 
 # Run the release binary against `list` (smoke test the optimised build).
+[group('dev release cli')]
 list-release: release
     {{release_bin}} list
 

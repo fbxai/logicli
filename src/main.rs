@@ -94,7 +94,7 @@ enum Command {
         /// Discovery/pairing window timeout in seconds
         #[arg(long, default_value_t = 30)]
         timeout: u8,
-        /// Use reduced entropy for mouse pairing (4 button presses instead of 10)
+        /// Try 4-button mouse authentication; fall back to 10 if unsupported
         #[arg(long)]
         short_auth: bool,
     },
@@ -721,6 +721,30 @@ struct BoltDiscoveredDevice {
     name: String,
 }
 
+fn bolt_pair_with_fallback(
+    mut req: [u8; 20],
+    mut write: impl FnMut(&[u8; 20]) -> Result<Vec<u8>>,
+) -> Result<(Vec<u8>, u8)> {
+    let mut resp = write(&req)?;
+    if req[13] == 4
+        && resp.starts_with(&[
+            HIDPP_SHORT,
+            HIDPP_RECEIVER,
+            0x8F,
+            REG_WRITE_LONG,
+            REG_BOLT_PAIRING,
+            0x0B,
+        ])
+    {
+        println!(
+            "      Short-auth is not supported by this device/receiver. Retrying with standard authentication (10 button presses)..."
+        );
+        req[13] = 10;
+        resp = write(&req)?;
+    }
+    Ok((resp, req[13]))
+}
+
 fn cmd_pair_bolt(dev: &HidDevice, timeout: u8, short_auth: bool) -> Result<()> {
     // Step 1: Enable notifications
     println!("[1/5] Enabling notifications...");
@@ -925,7 +949,14 @@ fn cmd_pair_bolt(dev: &HidDevice, timeout: u8, short_auth: bool) -> Result<()> {
     pair_req[12] = target.authentication;
     pair_req[13] = entropy;
 
-    let resp = hidpp_write_long(dev, &pair_req)?;
+    let (resp, entropy) = match bolt_pair_with_fallback(pair_req, |req| hidpp_write_long(dev, req))
+    {
+        Ok(result) => result,
+        Err(error) => {
+            let _ = write_notification_flags(dev, old_flags);
+            return Err(error);
+        }
+    };
     if is_error(&resp) {
         let ecode = if resp.len() >= 6 { resp[5] } else { 0 };
         let _ = write_notification_flags(dev, old_flags);
@@ -1245,4 +1276,73 @@ fn cmd_debug(api: &HidApi, path: Option<&str>) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const UNSUPPORTED: [u8; 7] = [0x10, 0xFF, 0x8F, 0x82, 0xC1, 0x0B, 0x00];
+
+    fn pair_request(entropy: u8) -> [u8; 20] {
+        let mut req = [0u8; 20];
+        req[..14].copy_from_slice(&[0x11, 0xFF, 0x82, 0xC1, 1, 0, 1, 2, 3, 4, 5, 6, 2, entropy]);
+        req
+    }
+
+    #[test]
+    fn unsupported_short_auth_retries_once_with_ten_bits() {
+        for retry_response in [vec![0x11, 0xFF, 0x82, 0xC1], UNSUPPORTED.to_vec()] {
+            let mut requests = Vec::new();
+            let (resp, entropy) = bolt_pair_with_fallback(pair_request(4), |req| {
+                requests.push(*req);
+                Ok(if requests.len() == 1 {
+                    UNSUPPORTED.to_vec()
+                } else {
+                    retry_response.clone()
+                })
+            })
+            .unwrap();
+            assert_eq!(requests, [pair_request(4), pair_request(10)]);
+            assert_eq!(entropy, 10);
+            assert_eq!(resp, retry_response);
+        }
+    }
+
+    #[test]
+    fn other_responses_and_standard_auth_do_not_retry() {
+        for (entropy, response) in [
+            (4, vec![0x11, 0xFF, 0x82, 0xC1]),
+            (4, vec![0x10, 0xFF, 0x8F, 0x82, 0xC1, 0x07, 0]),
+            (4, UNSUPPORTED[..5].to_vec()),
+            (4, vec![]),
+            (10, UNSUPPORTED.to_vec()),
+            (20, UNSUPPORTED.to_vec()),
+        ] {
+            let mut calls = 0;
+            let result = bolt_pair_with_fallback(pair_request(entropy), |_| {
+                calls += 1;
+                Ok(response.clone())
+            })
+            .unwrap();
+            assert_eq!(calls, 1);
+            assert_eq!(result, (response, entropy));
+        }
+    }
+
+    #[test]
+    fn transport_errors_propagate_without_further_retries() {
+        for fail_on in [1, 2] {
+            let mut calls = 0;
+            let result = bolt_pair_with_fallback(pair_request(4), |_| {
+                calls += 1;
+                if calls == fail_on {
+                    bail!("device disconnected");
+                }
+                Ok(UNSUPPORTED.to_vec())
+            });
+            assert_eq!(calls, fail_on);
+            assert_eq!(result.unwrap_err().to_string(), "device disconnected");
+        }
+    }
 }

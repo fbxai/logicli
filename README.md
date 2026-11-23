@@ -103,9 +103,7 @@ logicli pair --path DevSrvsID:… # target a specific receiver
       Then press LEFT + RIGHT simultaneously.
 ```
 
-The `--short-auth` flag reduces mouse entropy from 10 bits (10 presses) to
-4 bits (4 presses). Security tradeoff is minimal — an attacker would need to
-be in BLE range during the few-second pairing window.
+The `--short-auth` flag requests 4 bits of mouse authentication (4 presses) instead of the standard 10 bits (10 presses). If the device/receiver rejects this as unsupported, the CLI explains the limitation and automatically retries with 10 presses. Follow the displayed sequence. Four-bit authentication has only 16 possible sequences, compared with 1,024 for ten-bit authentication.
 
 ### `logicli unpair`
 
